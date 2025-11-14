@@ -58,3 +58,15 @@ async def analyze_text(request: Request):
         "categories": categories,
         "syntax": tokens[:50]
     }
+from fastapi import FastAPI, Request
+from google.cloud import language_v1
+import os
+
+# --- TEMP DIAGNOSTIC ---
+print("DEBUG: Checking for /etc/secrets contents...")
+if os.path.exists("/etc/secrets"):
+    print("DEBUG: /etc/secrets exists. Files:", os.listdir("/etc/secrets"))
+else:
+    print("DEBUG: /etc/secrets does not exist.")
+# --- END DIAGNOSTIC ---
+
