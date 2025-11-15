@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from google.cloud import language_v1
 from google.oauth2 import service_account
 import time
@@ -8,7 +9,10 @@ app = FastAPI()
 
 @app.get("/")
 def root():
-    return {"status": "ok", "message": "Google Cloud NLP API is connected."}
+    return @app.get("/", response_class=HTMLResponse)
+def serve_home():
+    with open("index.html", "r") as f:
+        return f.read()
 
 @app.post("/analyze")
 async def analyze_text(request: Request):
@@ -75,3 +79,4 @@ async def analyze_text(request: Request):
         "categories": categories,
         "syntax": tokens[:50]
     }
+
