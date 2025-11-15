@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from google.cloud import language_v1
 from google.oauth2 import service_account
 import os
@@ -8,16 +7,22 @@ import time
 
 app = FastAPI()
 
-# --- Serve frontend explicitly ---
+# --- Always serve the HTML file from an absolute path ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_FILE = os.path.join(BASE_DIR, "static", "app.html")
+
 @app.get("/", response_class=FileResponse)
-def serve_home():
-    return FileResponse("static/app.html")
+def root():
+    """Serve frontend HTML file or return JSON error if missing."""
+    if os.path.exists(FRONTEND_FILE):
+        return FileResponse(FRONTEND_FILE)
+    return JSONResponse({"error": f"Frontend file not found at {FRONTEND_FILE}"}, status_code=404)
 
 
-# --- Google Cloud setup ---
+# --- Google Cloud credentials ---
 key_path = "/etc/secrets/google-service-key.json"
 
-# Wait for Render to mount secret file
+# Wait for Render to mount the secret
 for _ in range(10):
     if os.path.exists(key_path):
         break
@@ -26,7 +31,7 @@ for _ in range(10):
 if not os.path.exists(key_path):
     raise FileNotFoundError(f"Google credentials not found at {key_path}")
 
-# Load credentials and NLP client
+# Load credentials and initialize NLP client
 credentials = service_account.Credentials.from_service_account_file(key_path)
 client = language_v1.LanguageServiceClient(credentials=credentials)
 
@@ -51,17 +56,19 @@ async def analyze_text(request: Request):
     entities_response = client.analyze_entities(document=document)
     sentiment_response = client.analyze_sentiment(document=document)
     syntax_response = client.analyze_syntax(document=document)
-    category_response = None
-    if len(text.split()) > 20:
-        try:
-            category_response = client.classify_text(document=document)
-        except Exception:
-            category_response = None
+
+    try:
+        category_response = client.classify_text(document=document) if len(text.split()) > 20 else None
+    except Exception:
+        category_response = None
 
     # Format results
     entities = [
-        {"name": e.name, "type": language_v1.Entity.Type(e.type_).name, "salience": round(e.salience, 3)}
-        for e in entities_response.entities
+        {
+            "name": e.name,
+            "type": language_v1.Entity.Type(e.type_).name,
+            "salience": round(e.salience, 3)
+        } for e in entities_response.entities
     ]
 
     sentiment = {
@@ -78,8 +85,7 @@ async def analyze_text(request: Request):
         {
             "text": t.text.content,
             "part_of_speech": language_v1.PartOfSpeech.Tag(t.part_of_speech.tag).name,
-        }
-        for t in syntax_response.tokens[:50]
+        } for t in syntax_response.tokens[:50]
     ]
 
     return {
@@ -88,4 +94,5 @@ async def analyze_text(request: Request):
         "categories": categories,
         "syntax": tokens,
     }
+
 
