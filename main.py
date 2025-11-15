@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from google.cloud import language_v1
 from google.oauth2 import service_account
 import os
@@ -7,37 +7,36 @@ import time
 
 app = FastAPI()
 
-# --- Load Google credentials from secret ---
+# === Google Cloud Service Account Setup ===
 key_path = "/etc/secrets/google-service-key.json"
 
-# Wait for Render to mount secrets (in case of cold start delay)
+# Wait briefly for Render to mount the secret file
 for _ in range(10):
     if os.path.exists(key_path):
         break
     time.sleep(1)
 
 if not os.path.exists(key_path):
-    raise FileNotFoundError(f"Google service account key not found at {key_path}")
+    raise FileNotFoundError(f"Credentials file not found at {key_path}")
 
-# Load credentials explicitly
+# Load credentials explicitly and initialize client
 credentials = service_account.Credentials.from_service_account_file(key_path)
 client = language_v1.LanguageServiceClient(credentials=credentials)
 
 
-# --- Serve front-end page ---
+# === Serve the Frontend ===
 @app.get("/", response_class=HTMLResponse)
 def serve_home():
-    """Serves the index.html front-end UI."""
+    """Serve the index.html frontend properly as HTML."""
     try:
-        if os.path.exists("index.html"):
-            with open("index.html", "r") as f:
-                html = f.read()
-            return HTMLResponse(content=html, status_code=200)
+        html_path = os.path.join(os.getcwd(), "index.html")
+        if os.path.exists(html_path):
+            return FileResponse(html_path, media_type="text/html")
         else:
             return HTMLResponse(
                 content="""
                 <h2>SEO NLP Engine</h2>
-                <p>Frontend not found. API endpoint available at <code>/analyze</code>.</p>
+                <p>No index.html found. API available at <code>/analyze</code>.</p>
                 """,
                 status_code=200
             )
@@ -45,22 +44,27 @@ def serve_home():
         raise HTTPException(status_code=500, detail=f"Error loading home page: {e}")
 
 
-# --- Analyze text using Google Cloud NLP ---
+# === API Health Check ===
+@app.get("/health", response_class=JSONResponse)
+def health_check():
+    return {"status": "ok", "message": "Google Cloud NLP API is connected."}
+
+
+# === NLP Analyzer Endpoint ===
 @app.post("/analyze")
 async def analyze_text(request: Request):
-    """Analyzes text for entities, sentiment, syntax, and categories."""
+    """Analyze text using Google Cloud NLP API."""
+    data = await request.json()
+    text = data.get("text")
+
+    if not text:
+        return JSONResponse({"error": "No text provided."}, status_code=400)
+
     try:
-        data = await request.json()
-        text = data.get("text", "").strip()
-
-        if not text:
-            return JSONResponse({"error": "No text provided."}, status_code=400)
-
         document = language_v1.Document(
             content=text, type_=language_v1.Document.Type.PLAIN_TEXT
         )
 
-        # Run analyses
         entities_response = client.analyze_entities(document=document)
         sentiment_response = client.analyze_sentiment(document=document)
         category_response = (
@@ -68,7 +72,6 @@ async def analyze_text(request: Request):
         )
         syntax_response = client.analyze_syntax(document=document)
 
-        # Format results
         entities = [
             {
                 "name": e.name,
@@ -103,7 +106,7 @@ async def analyze_text(request: Request):
         ]
 
         return JSONResponse(
-            content={
+            {
                 "entities": entities,
                 "sentiment": sentiment,
                 "categories": categories,
@@ -112,4 +115,6 @@ async def analyze_text(request: Request):
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
