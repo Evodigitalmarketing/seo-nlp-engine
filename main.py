@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from google.cloud import language_v1
 from google.oauth2 import service_account
 import os
@@ -7,108 +7,40 @@ import time
 
 app = FastAPI()
 
-# --------------------------
-# Serve frontend app.html
-# --------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FRONTEND_FILE = os.path.join(BASE_DIR, "static", "app.html")
+# Debug route — confirms what Render actually sees
+@app.get("/debug")
+def debug_info():
+    base = os.getcwd()
+    tree = []
+    for root, dirs, files in os.walk(".", topdown=True):
+        for f in files:
+            tree.append(os.path.join(root, f))
+    info = f"WORKING DIR: {base}\n\nFILES:\n" + "\n".join(tree)
+    return PlainTextResponse(info)
 
-@app.get("/", response_class=FileResponse)
-def serve_frontend():
-    """Serve the frontend HTML file"""
-    if os.path.exists(FRONTEND_FILE):
-        return FileResponse(FRONTEND_FILE)
-    return JSONResponse(
-        {"error": f"Frontend file not found at {FRONTEND_FILE}"},
-        status_code=404
-    )
+# Root route — will serve the app.html *after* we confirm the correct path
+@app.get("/")
+def root():
+    return JSONResponse({"status": "ok", "message": "Diagnostic build active. Go to /debug"})
 
-
-# --------------------------
-# Google Cloud credentials setup
-# --------------------------
+# --- Google Cloud NLP setup (keep working while we debug UI) ---
 key_path = "/etc/secrets/google-service-key.json"
-
-# Wait for Render to mount the secret
 for _ in range(10):
     if os.path.exists(key_path):
         break
     time.sleep(1)
-
-if not os.path.exists(key_path):
-    raise FileNotFoundError(f"Google credentials not found at {key_path}")
-
-# Load credentials and NLP client
 credentials = service_account.Credentials.from_service_account_file(key_path)
 client = language_v1.LanguageServiceClient(credentials=credentials)
 
-
-# --------------------------
-# Health check endpoint
-# --------------------------
-@app.get("/healthz")
-def health_check():
-    """Health check for Render"""
-    return {"status": "ok", "message": "Google Cloud NLP API is connected."}
-
-
-# --------------------------
-# NLP Analyze endpoint
-# --------------------------
 @app.post("/analyze")
 async def analyze_text(request: Request):
-    """Analyze input text using Google Cloud NLP"""
     data = await request.json()
     text = data.get("text", "").strip()
-
     if not text:
         return JSONResponse({"error": "Missing text"}, status_code=400)
-
     document = language_v1.Document(content=text, type_=language_v1.Document.Type.PLAIN_TEXT)
+    result = client.analyze_sentiment(document=document)
+    return {"sentiment": result.document_sentiment.score}
 
-    # Run NLP analyses
-    entities_response = client.analyze_entities(document=document)
-    sentiment_response = client.analyze_sentiment(document=document)
-    syntax_response = client.analyze_syntax(document=document)
-
-    try:
-        category_response = client.classify_text(document=document) if len(text.split()) > 20 else None
-    except Exception:
-        category_response = None
-
-    # Format results
-    entities = [
-        {
-            "name": e.name,
-            "type": language_v1.Entity.Type(e.type_).name,
-            "salience": round(e.salience, 3)
-        }
-        for e in entities_response.entities
-    ]
-
-    sentiment = {
-        "score": round(sentiment_response.document_sentiment.score, 3),
-        "magnitude": round(sentiment_response.document_sentiment.magnitude, 3),
-    }
-
-    categories = [
-        {"name": c.name, "confidence": round(c.confidence, 3)}
-        for c in category_response.categories
-    ] if category_response else []
-
-    tokens = [
-        {
-            "text": t.text.content,
-            "part_of_speech": language_v1.PartOfSpeech.Tag(t.part_of_speech.tag).name,
-        }
-        for t in syntax_response.tokens[:50]
-    ]
-
-    return {
-        "entities": entities,
-        "sentiment": sentiment,
-        "categories": categories,
-        "syntax": tokens,
-    }
 
 
