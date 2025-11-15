@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import language_v1
 from google.oauth2 import service_account
@@ -8,13 +8,16 @@ import time
 
 app = FastAPI()
 
-# Serve static frontend (app.html)
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+# --- Serve frontend explicitly ---
+@app.get("/", response_class=FileResponse)
+def serve_home():
+    return FileResponse("static/app.html")
 
-# Path to Google Cloud credentials
+
+# --- Google Cloud setup ---
 key_path = "/etc/secrets/google-service-key.json"
 
-# Wait for Render to mount the secret file
+# Wait for Render to mount secret file
 for _ in range(10):
     if os.path.exists(key_path):
         break
@@ -23,14 +26,16 @@ for _ in range(10):
 if not os.path.exists(key_path):
     raise FileNotFoundError(f"Google credentials not found at {key_path}")
 
-# Load Google credentials and NLP client
+# Load credentials and NLP client
 credentials = service_account.Credentials.from_service_account_file(key_path)
 client = language_v1.LanguageServiceClient(credentials=credentials)
 
+
 @app.get("/healthz")
 def health_check():
-    """Used by Render to verify the app is running"""
+    """Render health check endpoint"""
     return {"status": "ok", "message": "Google Cloud NLP API is connected."}
+
 
 @app.post("/analyze")
 async def analyze_text(request: Request):
@@ -51,7 +56,7 @@ async def analyze_text(request: Request):
         try:
             category_response = client.classify_text(document=document)
         except Exception:
-            category_response = None  # Skip if text too short or not classifiable
+            category_response = None
 
     # Format results
     entities = [
@@ -61,7 +66,7 @@ async def analyze_text(request: Request):
 
     sentiment = {
         "score": round(sentiment_response.document_sentiment.score, 3),
-        "magnitude": round(sentiment_response.document_sentiment.magnitude, 3)
+        "magnitude": round(sentiment_response.document_sentiment.magnitude, 3),
     }
 
     categories = [
@@ -81,5 +86,6 @@ async def analyze_text(request: Request):
         "entities": entities,
         "sentiment": sentiment,
         "categories": categories,
-        "syntax": tokens
+        "syntax": tokens,
     }
+
