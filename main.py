@@ -1,5 +1,7 @@
 from fastapi import FastAPI, Request
 from google.cloud import language_v1
+from google.oauth2 import service_account
+import time
 import os
 
 app = FastAPI()
@@ -16,28 +18,22 @@ async def analyze_text(request: Request):
     if not text:
         return {"error": "No text provided."}
 
-  from google.oauth2 import service_account
-import time
-import os
+    key_path = "/etc/secrets/google-service-key.json"
 
-key_path = "/etc/secrets/google-service-key.json"
+    # Wait briefly for Render to mount the secret file
+    for _ in range(10):
+        if os.path.exists(key_path):
+            break
+        time.sleep(1)
 
-# Wait briefly for Render to mount the secret file
-for _ in range(10):
-    if os.path.exists(key_path):
-        break
-    time.sleep(1)
+    if not os.path.exists(key_path):
+        raise FileNotFoundError(f"Credentials file not found at {key_path}")
 
-if not os.path.exists(key_path):
-    raise FileNotFoundError(f"Credentials file not found at {key_path}")
+    print("DEBUG: Credentials file found at", key_path)
 
-print("DEBUG: Credentials file found at", key_path)
-
-# Load credentials directly and create NLP client
-credentials = service_account.Credentials.from_service_account_file(key_path)
-client = language_v1.LanguageServiceClient(credentials=credentials)
-
-
+    # Load credentials directly and create NLP client
+    credentials = service_account.Credentials.from_service_account_file(key_path)
+    client = language_v1.LanguageServiceClient(credentials=credentials)
     document = language_v1.Document(content=text, type_=language_v1.Document.Type.PLAIN_TEXT)
 
     # Run all analyses
@@ -79,15 +75,3 @@ client = language_v1.LanguageServiceClient(credentials=credentials)
         "categories": categories,
         "syntax": tokens[:50]
     }
-from fastapi import FastAPI, Request
-from google.cloud import language_v1
-import os
-
-# --- TEMP DIAGNOSTIC ---
-print("DEBUG: Checking for /etc/secrets contents...")
-if os.path.exists("/etc/secrets"):
-    print("DEBUG: /etc/secrets exists. Files:", os.listdir("/etc/secrets"))
-else:
-    print("DEBUG: /etc/secrets does not exist.")
-# --- END DIAGNOSTIC ---
-
