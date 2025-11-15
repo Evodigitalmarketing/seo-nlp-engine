@@ -16,13 +16,27 @@ async def analyze_text(request: Request):
     if not text:
         return {"error": "No text provided."}
 
-   from google.oauth2 import service_account
+  from google.oauth2 import service_account
+import time
+import os
 
-# Explicitly load credentials from the mounted Render secret file
-credentials = service_account.Credentials.from_service_account_file(
-    "/etc/secrets/google-service-key.json"
-)
+key_path = "/etc/secrets/google-service-key.json"
+
+# Wait briefly for Render to mount the secret file
+for _ in range(10):
+    if os.path.exists(key_path):
+        break
+    time.sleep(1)
+
+if not os.path.exists(key_path):
+    raise FileNotFoundError(f"Credentials file not found at {key_path}")
+
+print("DEBUG: Credentials file found at", key_path)
+
+# Load credentials directly and create NLP client
+credentials = service_account.Credentials.from_service_account_file(key_path)
 client = language_v1.LanguageServiceClient(credentials=credentials)
+
 
     document = language_v1.Document(content=text, type_=language_v1.Document.Type.PLAIN_TEXT)
 
