@@ -16,7 +16,14 @@ async def analyze_text(request: Request):
     if not text:
         return {"error": "No text provided."}
 
-    client = language_v1.LanguageServiceClient()
+   from google.oauth2 import service_account
+
+# Explicitly load credentials from the mounted Render secret file
+credentials = service_account.Credentials.from_service_account_file(
+    "/etc/secrets/google-service-key.json"
+)
+client = language_v1.LanguageServiceClient(credentials=credentials)
+
     document = language_v1.Document(content=text, type_=language_v1.Document.Type.PLAIN_TEXT)
 
     # Run all analyses
