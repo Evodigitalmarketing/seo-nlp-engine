@@ -5,6 +5,7 @@ from google.cloud import language_v1
 from google.oauth2 import service_account
 import os
 import json
+import urllib.parse
 
 # ============================================================
 #  FASTAPI APP SETUP
@@ -24,20 +25,25 @@ def serve_home():
 # ✅ Render sends HEAD requests to check health — handle them here
 @app.head("/")
 async def head_home():
-    # simple 200 OK response for Render’s health check
     return {"status": "ok"}
 
 # ============================================================
 #  GOOGLE CLOUD NLP CREDENTIALS
 # ============================================================
 
-creds_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-if not creds_json:
-    raise RuntimeError("Missing GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable")
+# Try to read either normal or URL-encoded credentials
+raw_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON_URLENCODED")
+if not raw_creds:
+    raise RuntimeError("Missing GOOGLE_APPLICATION_CREDENTIALS_JSON or _URLENCODED environment variable")
 
-# Parse the JSON key stored in Render environment variable
-credentials_info = json.loads(creds_json)
-credentials = service_account.Credentials.from_service_account_info(credentials_info)
+# Decode JSON safely
+try:
+    creds_data = json.loads(raw_creds)
+except json.JSONDecodeError:
+    creds_data = json.loads(urllib.parse.unquote(raw_creds))
+
+# Create the Google NLP client
+credentials = service_account.Credentials.from_service_account_info(creds_data)
 client = language_v1.LanguageServiceClient(credentials=credentials)
 
 # ============================================================
@@ -94,6 +100,6 @@ async def analyze_text(request: Request):
 # ============================================================
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
     import uvicorn
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
