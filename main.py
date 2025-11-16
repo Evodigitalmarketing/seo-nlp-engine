@@ -1,80 +1,99 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import language_v1
 from google.oauth2 import service_account
 import os
-import time
+import json
+
+# ============================================================
+#  FASTAPI APP SETUP
+# ============================================================
 
 app = FastAPI()
 
-# Serve static files from the "static" directory
+# ✅ Serve your frontend from the /static folder
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Serve the frontend
+# ✅ Homepage (serves your UI)
 @app.get("/", response_class=HTMLResponse)
-def serve_ui():
-    html_path = "static/app.html"
-    if not os.path.exists(html_path):
-        return HTMLResponse("<h1>Missing app.html file</h1>", status_code=500)
-    with open(html_path, "r") as f:
+def serve_home():
+    with open("static/app.html", "r", encoding="utf-8") as f:
         return f.read()
 
-# --- Google Cloud NLP Setup ---
-key_path = "/etc/secrets/google-service-key.json"
+# ✅ Render sends HEAD requests to check health — handle them here
+@app.head("/")
+async def head_home():
+    # simple 200 OK response for Render’s health check
+    return {"status": "ok"}
 
-# Wait briefly for Render to mount the secret file
-for _ in range(10):
-    if os.path.exists(key_path):
-        break
-    time.sleep(1)
+# ============================================================
+#  GOOGLE CLOUD NLP CREDENTIALS
+# ============================================================
 
-if not os.path.exists(key_path):
-    raise FileNotFoundError(f"Credentials file not found at {key_path}")
+creds_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+if not creds_json:
+    raise RuntimeError("Missing GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable")
 
-credentials = service_account.Credentials.from_service_account_file(key_path)
+# Parse the JSON key stored in Render environment variable
+credentials_info = json.loads(creds_json)
+credentials = service_account.Credentials.from_service_account_info(credentials_info)
 client = language_v1.LanguageServiceClient(credentials=credentials)
 
-# --- NLP API Endpoint ---
+# ============================================================
+#  NLP ANALYSIS ENDPOINT
+# ============================================================
+
 @app.post("/analyze")
 async def analyze_text(request: Request):
-    try:
-        data = await request.json()
-        text = data.get("text", "")
-        if not text:
-            return JSONResponse({"error": "No text provided"}, status_code=400)
+    data = await request.json()
+    text = data.get("text", "")
 
-        document = language_v1.Document(content=text, type_=language_v1.Document.Type.PLAIN_TEXT)
+    if not text.strip():
+        return {"error": "No text provided."}
 
-        entities_response = client.analyze_entities(document=document)
-        sentiment_response = client.analyze_sentiment(document=document)
-        syntax_response = client.analyze_syntax(document=document)
+    document = language_v1.Document(
+        content=text,
+        type_=language_v1.Document.Type.PLAIN_TEXT
+    )
 
-        entities = [
-            {
-                "name": e.name,
-                "type": language_v1.Entity.Type(e.type_).name,
-                "salience": round(e.salience, 3),
-            }
-            for e in entities_response.entities
-        ]
+    entities_response = client.analyze_entities(document=document)
+    sentiment_response = client.analyze_sentiment(document=document)
+    syntax_response = client.analyze_syntax(document=document)
 
-        sentiment = {
-            "score": round(sentiment_response.document_sentiment.score, 3),
-            "magnitude": round(sentiment_response.document_sentiment.magnitude, 3),
+    entities = [
+        {
+            "name": e.name,
+            "type": language_v1.Entity.Type(e.type_).name,
+            "salience": round(e.salience, 3)
         }
+        for e in entities_response.entities
+    ]
 
-        tokens = [
-            {
-                "text": t.text.content,
-                "part_of_speech": language_v1.PartOfSpeech.Tag(t.part_of_speech.tag).name,
-            }
-            for t in syntax_response.tokens
-        ]
+    sentiment = {
+        "score": round(sentiment_response.document_sentiment.score, 3),
+        "magnitude": round(sentiment_response.document_sentiment.magnitude, 3)
+    }
 
-        return {"entities": entities, "sentiment": sentiment, "syntax": tokens[:50]}
+    tokens = [
+        {
+            "text": t.text.content,
+            "part_of_speech": language_v1.PartOfSpeech.Tag(t.part_of_speech.tag).name
+        }
+        for t in syntax_response.tokens
+    ]
 
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+    return {
+        "entities": entities,
+        "sentiment": sentiment,
+        "syntax": tokens[:50]
+    }
 
+# ============================================================
+#  LOCAL DEV ENTRYPOINT (ignored on Render)
+# ============================================================
 
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=port)
