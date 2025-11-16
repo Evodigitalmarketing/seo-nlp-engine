@@ -32,17 +32,22 @@ async def head_home():
 # ============================================================
 
 # Try to read either normal or URL-encoded credentials
-raw_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON_URLENCODED")
-if not raw_creds:
-    raise RuntimeError("Missing GOOGLE_APPLICATION_CREDENTIALS_JSON or _URLENCODED environment variable")
+raw_creds = (
+    os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    or os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON_URLENCODED")
+)
 
-# Decode JSON safely
+if not raw_creds:
+    raise RuntimeError(
+        "Missing GOOGLE_APPLICATION_CREDENTIALS_JSON or _URLENCODED environment variable"
+    )
+
+# Decode JSON safely (handles multi-line and URL-encoded values)
 try:
     creds_data = json.loads(raw_creds)
 except json.JSONDecodeError:
     creds_data = json.loads(urllib.parse.unquote(raw_creds))
 
-# Create the Google NLP client
 credentials = service_account.Credentials.from_service_account_info(creds_data)
 client = language_v1.LanguageServiceClient(credentials=credentials)
 
@@ -59,8 +64,7 @@ async def analyze_text(request: Request):
         return {"error": "No text provided."}
 
     document = language_v1.Document(
-        content=text,
-        type_=language_v1.Document.Type.PLAIN_TEXT
+        content=text, type_=language_v1.Document.Type.PLAIN_TEXT
     )
 
     entities_response = client.analyze_entities(document=document)
@@ -71,20 +75,22 @@ async def analyze_text(request: Request):
         {
             "name": e.name,
             "type": language_v1.Entity.Type(e.type_).name,
-            "salience": round(e.salience, 3)
+            "salience": round(e.salience, 3),
         }
         for e in entities_response.entities
     ]
 
     sentiment = {
         "score": round(sentiment_response.document_sentiment.score, 3),
-        "magnitude": round(sentiment_response.document_sentiment.magnitude, 3)
+        "magnitude": round(sentiment_response.document_sentiment.magnitude, 3),
     }
 
     tokens = [
         {
             "text": t.text.content,
-            "part_of_speech": language_v1.PartOfSpeech.Tag(t.part_of_speech.tag).name
+            "part_of_speech": language_v1.PartOfSpeech.Tag(
+                t.part_of_speech.tag
+            ).name,
         }
         for t in syntax_response.tokens
     ]
@@ -92,7 +98,7 @@ async def analyze_text(request: Request):
     return {
         "entities": entities,
         "sentiment": sentiment,
-        "syntax": tokens[:50]
+        "syntax": tokens[:50],
     }
 
 # ============================================================
@@ -101,5 +107,6 @@ async def analyze_text(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
