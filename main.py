@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import language_v1
 from google.oauth2 import service_account
@@ -8,10 +8,10 @@ import time
 
 app = FastAPI()
 
-# Serve all static files (like CSS/JS) if you add them later
+# Serve static files from the "static" directory
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Serve app.html directly
+# Serve the frontend
 @app.get("/", response_class=HTMLResponse)
 def serve_ui():
     html_path = "static/app.html"
@@ -20,21 +20,22 @@ def serve_ui():
     with open(html_path, "r") as f:
         return f.read()
 
-
-# Google Cloud NLP setup
+# --- Google Cloud NLP Setup ---
 key_path = "/etc/secrets/google-service-key.json"
+
+# Wait briefly for Render to mount the secret file
 for _ in range(10):
     if os.path.exists(key_path):
         break
     time.sleep(1)
 
 if not os.path.exists(key_path):
-    raise FileNotFoundError(f"Credentials file not found: {key_path}")
+    raise FileNotFoundError(f"Credentials file not found at {key_path}")
 
 credentials = service_account.Credentials.from_service_account_file(key_path)
 client = language_v1.LanguageServiceClient(credentials=credentials)
 
-
+# --- NLP API Endpoint ---
 @app.post("/analyze")
 async def analyze_text(request: Request):
     try:
@@ -53,14 +54,14 @@ async def analyze_text(request: Request):
             {
                 "name": e.name,
                 "type": language_v1.Entity.Type(e.type_).name,
-                "salience": round(e.salience, 3)
+                "salience": round(e.salience, 3),
             }
             for e in entities_response.entities
         ]
 
         sentiment = {
             "score": round(sentiment_response.document_sentiment.score, 3),
-            "magnitude": round(sentiment_response.document_sentiment.magnitude, 3)
+            "magnitude": round(sentiment_response.document_sentiment.magnitude, 3),
         }
 
         tokens = [
@@ -75,7 +76,5 @@ async def analyze_text(request: Request):
 
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
-
-
 
 
